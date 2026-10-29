@@ -74,6 +74,13 @@
   header h1 .o { color: var(--otter); }
   header h1 .w { color: var(--weasel); }
   header p { margin: 0; color: var(--muted); max-width: 60ch; }
+  header p.tagline { color: var(--fg); font-weight: 700; font-size: 18px; margin-bottom: 4px; }
+
+  .opt { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 14px; color: var(--muted); }
+  .opt input { width: 18px; height: 18px; accent-color: var(--otter); }
+  .bio { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+  .bio h3 { margin: 0 0 4px; font-size: 16px; }
+  .bio p { margin: 0; font-size: 15px; color: var(--muted); }
 
   .panel {
     background: var(--surface);
@@ -180,6 +187,7 @@
 
   <header>
     <h1><span class="o">수달</span>일까, <span class="w">족제비</span>일까?</h1>
+    <p class="tagline">사진 한 장으로 수달과 족제비를 구분해 주는 AI 판별기</p>
     <p>사진을 올리거나 카메라로 비추면 티처블 머신으로 학습한 모델이 두 동물을 구분해 줘요.</p>
   </header>
 
@@ -202,6 +210,7 @@
         <button type="button" id="pick-btn" disabled>사진 고르기</button>
         <button type="button" id="cam-btn" disabled>카메라 켜기</button>
       </div>
+      <label class="opt"><input type="checkbox" id="rear-cam"> 휴대폰 후면 카메라 사용</label>
       <input type="file" id="file" accept="image/*">
     </div>
 
@@ -211,6 +220,24 @@
       <p class="verdict-sub" id="verdict-sub"></p>
       <div class="bars" id="bars">
         <p class="empty-res">모델을 불러오고 사진을 넣으면 여기에 확률이 나와요.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>AI와 생물다양성 보전</h2>
+    <div class="bio">
+      <div>
+        <h3>왜 수달을 구분할까요?</h3>
+        <p>수달은 우리나라에서 멸종위기 야생생물 Ⅰ급이자 천연기념물 제330호예요. 물가에서 찍힌 사진 속 동물이 수달인지 알아보는 일이 보호의 첫걸음이 될 수 있어요.</p>
+      </div>
+      <div>
+        <h3>AI가 도울 수 있는 일</h3>
+        <p>무인 카메라가 찍은 수많은 사진을 먼저 분류해 주면, 연구자와 시민이 더 빨리 어떤 동물이 지나갔는지 확인할 수 있어요.</p>
+      </div>
+      <div>
+        <h3>조심할 점</h3>
+        <p>이 모델은 제가 학습시킨 사진 범위 안에서만 잘 맞혀요. 결과는 참고용으로 보고, 야생동물을 만나면 가까이 다가가지 말고 멀리서 관찰해요.</p>
       </div>
     </div>
   </section>
@@ -366,8 +393,9 @@
     if (!model) return;
     camBtn.disabled = true;
     try {
-      webcam = new tmImage.Webcam(480, 480, true);
-      await webcam.setup();
+      var rear = $("rear-cam").checked;
+      webcam = new tmImage.Webcam(480, 480, !rear);
+      await webcam.setup({ facingMode: rear ? "environment" : "user" });
       await webcam.play();
       stage.innerHTML = "";
       stage.appendChild(webcam.canvas);
