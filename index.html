@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>수달 족제비 판별기</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&family=Noto+Serif+KR:wght@700;900&display=swap" rel="stylesheet">
+<style>
+  /* 레이아웃: 위에 모델 연결 바, 아래는 왼쪽 사진/카메라 + 오른쪽 판별 결과, 맨 아래 생김새 비교표 */
+  :root {
+    --bg: #f3f5f2;
+    --surface: #ffffff;
+    --fg: #1d2623;
+    --muted: #5d6b66;
+    --line: #d5dcd7;
+    --otter: #2f6f73;
+    --weasel: #b5602b;
+    --ok: #2f7d4f;
+    --warn: #a86a00;
+    --font-display: "Noto Serif KR", "Batang", serif;
+    --font-body: "Noto Sans KR", system-ui, -apple-system, "Malgun Gothic", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #141a19;
+      --surface: #1e2625;
+      --fg: #e6ece9;
+      --muted: #9baba5;
+      --line: #33403d;
+      --otter: #5fb3b8;
+      --weasel: #e39561;
+      --ok: #6fcf94;
+      --warn: #e0a84a;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #141a19;
+    --surface: #1e2625;
+    --fg: #e6ece9;
+    --muted: #9baba5;
+    --line: #33403d;
+    --otter: #5fb3b8;
+    --weasel: #e39561;
+    --ok: #6fcf94;
+    --warn: #e0a84a;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.6;
+    padding-block: 32px 56px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  .wrap { max-width: 960px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }
+
+  header h1 {
+    font-family: var(--font-display);
+    font-weight: 900;
+    font-size: clamp(30px, 6vw, 46px);
+    line-height: 1.15;
+    margin: 0 0 6px;
+    text-wrap: balance;
+  }
+  header h1 .o { color: var(--otter); }
+  header h1 .w { color: var(--weasel); }
+  header p { margin: 0; color: var(--muted); max-width: 60ch; }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 18px;
+  }
+  .panel h2 {
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    margin: 0 0 12px;
+    color: var(--muted);
+    font-weight: 700;
+  }
+
+  /* 모델 연결 */
+  .model-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .model-row input[type="url"] {
+    flex: 1 1 280px;
+    min-width: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--fg);
+    font: inherit;
+    font-size: 15px;
+  }
+  button, .btn {
+    font: inherit;
+    font-size: 15px;
+    font-weight: 500;
+    padding: 10px 16px;
+    border-radius: 6px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--fg);
+    cursor: pointer;
+  }
+  button.primary { background: var(--otter); border-color: var(--otter); color: #fff; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) button.primary { color: #0e1514; } }
+  :root[data-theme="dark"] button.primary { color: #0e1514; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button:focus-visible, input:focus-visible, .drop:focus-visible { outline: 3px solid var(--weasel); outline-offset: 2px; }
+  .status { margin: 10px 0 0; font-size: 14px; color: var(--muted); min-height: 1.6em; }
+  .status.ok { color: var(--ok); }
+  .status.err { color: var(--weasel); }
+
+  /* 작업 영역 */
+  .work { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+  @media (max-width: 720px) { .work { grid-template-columns: minmax(0, 1fr); } }
+
+  .stage {
+    position: relative;
+    aspect-ratio: 1 / 1;
+    max-width: 100%;
+    border-radius: 8px;
+    border: 1.5px dashed var(--line);
+    background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+    text-align: center;
+  }
+  .stage.over { border-color: var(--otter); }
+  .stage img, .stage canvas { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .stage .hint { color: var(--muted); padding: 16px; font-size: 15px; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+
+  /* 결과 */
+  .verdict {
+    font-family: var(--font-display);
+    font-weight: 900;
+    font-size: clamp(26px, 5vw, 36px);
+    line-height: 1.2;
+    margin: 0 0 4px;
+    min-height: 1.2em;
+  }
+  .verdict-sub { margin: 0 0 18px; color: var(--muted); font-size: 14px; min-height: 1.5em; }
+  .bars { display: flex; flex-direction: column; gap: 14px; }
+  .bar-head { display: flex; justify-content: space-between; gap: 12px; font-weight: 500; }
+  .bar-head .pct { font-variant-numeric: tabular-nums; }
+  .track { height: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin-top: 4px; }
+  .fill { height: 100%; width: 0%; background: var(--otter); transition: width 0.2s ease; }
+  .bars .row:nth-child(2) .fill { background: var(--weasel); }
+  .bars .row:nth-child(n+3) .fill { background: var(--muted); }
+  .empty-res { color: var(--muted); font-size: 15px; margin: 0; }
+
+  /* 비교표 */
+  .table-scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; min-width: 480px; font-size: 15px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 13px; color: var(--muted); font-weight: 700; }
+  td:first-child { color: var(--muted); white-space: nowrap; }
+  th.o { color: var(--otter); }
+  th.w { color: var(--weasel); }
+  .foot { font-size: 13px; color: var(--muted); margin: 10px 0 0; }
+
+  @media (prefers-reduced-motion: reduce) { .fill { transition: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1><span class="o">수달</span>일까, <span class="w">족제비</span>일까?</h1>
+    <p>사진을 올리거나 카메라로 비추면 티처블 머신으로 학습한 모델이 두 동물을 구분해 줘요.</p>
+  </header>
+
+  <section class="panel" aria-labelledby="model-h">
+    <h2 id="model-h">모델 연결</h2>
+    <form class="model-row" id="model-form">
+      <input type="url" id="model-url" placeholder="https://teachablemachine.withgoogle.com/models/XXXXXXXX/" aria-label="티처블 머신 모델 링크" autocomplete="off">
+      <button type="submit" class="primary" id="load-btn">모델 불러오기</button>
+    </form>
+    <p class="status" id="status" role="status">티처블 머신에서 내보낸 모델 링크를 붙여 넣어 주세요.</p>
+  </section>
+
+  <section class="work">
+    <div class="panel">
+      <h2>입력</h2>
+      <div class="stage" id="stage" tabindex="0" aria-label="사진을 끌어다 놓는 영역">
+        <div class="hint" id="stage-hint">사진을 여기로 끌어다 놓거나<br>아래 버튼으로 고르세요.</div>
+      </div>
+      <div class="actions">
+        <button type="button" id="pick-btn" disabled>사진 고르기</button>
+        <button type="button" id="cam-btn" disabled>카메라 켜기</button>
+      </div>
+      <input type="file" id="file" accept="image/*">
+    </div>
+
+    <div class="panel" aria-live="polite">
+      <h2>판별 결과</h2>
+      <p class="verdict" id="verdict"></p>
+      <p class="verdict-sub" id="verdict-sub"></p>
+      <div class="bars" id="bars">
+        <p class="empty-res">모델을 불러오고 사진을 넣으면 여기에 확률이 나와요.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>사진에서 구분하는 포인트</h2>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th></th><th class="o">수달</th><th class="w">족제비</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>크기</td><td>몸길이 60~80cm, 몸무게 5~10kg 안팎</td><td>몸길이 30cm 안팎, 몸무게 1kg 미만</td></tr>
+          <tr><td>꼬리</td><td>굵고 길며 끝으로 갈수록 가늘어짐</td><td>가늘고 비교적 짧음</td></tr>
+          <tr><td>몸매</td><td>통통하고 묵직한 유선형</td><td>가늘고 긴 막대 모양</td></tr>
+          <tr><td>얼굴</td><td>넓적하고 둥근 얼굴, 긴 수염</td><td>작고 뾰족한 얼굴, 귀가 큼</td></tr>
+          <tr><td>서식지</td><td>맑은 물가, 물속 생활에 능숙</td><td>숲, 들판, 마을 주변</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="foot">모델이 헷갈릴 때는 위 표를 기준으로 직접 확인해 보세요. 실제 개체마다 차이가 있어요.</p>
+  </section>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@0.8.5/dist/teachablemachine-image.min.js"></script>
+<script>
+(function () {
+  // 모델 링크를 코드에 고정하고 싶으면 아래 따옴표 안에 붙여 넣으세요.
+  // 비워 두면 화면의 입력칸에 넣은 링크를 씁니다. ?model=링크 로도 지정할 수 있어요.
+  var DEFAULT_MODEL_URL = "https://teachablemachine.withgoogle.com/models/Py4NwGf1I/";
+
+  // 이 확률보다 낮으면 "확실하지 않아요"라고 알려 줍니다.
+  var CONFIDENCE_MIN = 0.6;
+
+  var $ = function (id) { return document.getElementById(id); };
+  var urlInput = $("model-url"), statusEl = $("status"), loadBtn = $("load-btn");
+  var stage = $("stage"), hint = $("stage-hint");
+  var fileInput = $("file"), pickBtn = $("pick-btn"), camBtn = $("cam-btn");
+  var verdictEl = $("verdict"), verdictSub = $("verdict-sub"), bars = $("bars");
+
+  var model = null, webcam = null, rafId = 0, camOn = false, busy = false;
+
+  function setStatus(msg, kind) {
+    statusEl.textContent = msg;
+    statusEl.className = "status" + (kind ? " " + kind : "");
+  }
+
+  function normalizeUrl(raw) {
+    var u = (raw || "").trim();
+    if (!u) return "";
+    if (u.indexOf("model.json") > -1) u = u.slice(0, u.indexOf("model.json"));
+    if (u.charAt(u.length - 1) !== "/") u += "/";
+    return u;
+  }
+
+  async function loadModel(raw) {
+    var base = normalizeUrl(raw);
+    if (!base) { setStatus("모델 링크를 입력해 주세요.", "err"); return; }
+    loadBtn.disabled = true;
+    setStatus("모델을 불러오는 중…");
+    try {
+      stopCamera();
+      model = await tmImage.load(base + "model.json", base + "metadata.json");
+      var names = model.getClassLabels().join(", ");
+      setStatus("모델을 불러왔어요. 클래스: " + names, "ok");
+      pickBtn.disabled = false;
+      camBtn.disabled = false;
+      try { localStorage.setItem("otter-weasel-model", base); } catch (e) {}
+    } catch (err) {
+      model = null;
+      pickBtn.disabled = true;
+      camBtn.disabled = true;
+      setStatus("모델을 불러오지 못했어요. 링크가 '공유 가능한 링크'인지 확인해 주세요.", "err");
+      console.error(err);
+    } finally {
+      loadBtn.disabled = false;
+    }
+  }
+
+  function renderResult(preds) {
+    var sorted = preds.slice().sort(function (a, b) { return b.probability - a.probability; });
+    var top = sorted[0];
+    if (top.probability >= CONFIDENCE_MIN) {
+      verdictEl.textContent = top.className;
+      verdictSub.textContent = "확률 " + Math.round(top.probability * 100) + "%";
+    } else {
+      verdictEl.textContent = "확실하지 않아요";
+      verdictSub.textContent = "가장 가까운 쪽은 " + top.className + " (" + Math.round(top.probability * 100) + "%)";
+    }
+    // 처음 한 번만 막대를 만들고 이후에는 값만 바꿉니다.
+    if (bars.querySelectorAll(".row").length !== preds.length) {
+      bars.innerHTML = "";
+      preds.forEach(function (p) {
+        var row = document.createElement("div");
+        row.className = "row";
+        row.innerHTML = '<div class="bar-head"><span class="nm"></span><span class="pct"></span></div>' +
+                        '<div class="track"><div class="fill"></div></div>';
+        row.querySelector(".nm").textContent = p.className;
+        bars.appendChild(row);
+      });
+    }
+    var rows = bars.querySelectorAll(".row");
+    preds.forEach(function (p, i) {
+      rows[i].querySelector(".nm").textContent = p.className;
+      rows[i].querySelector(".pct").textContent = Math.round(p.probability * 100) + "%";
+      rows[i].querySelector(".fill").style.width = (p.probability * 100).toFixed(1) + "%";
+    });
+  }
+
+  async function predict(source) {
+    if (!model || busy) return;
+    busy = true;
+    try { renderResult(await model.predict(source)); }
+    catch (err) { console.error(err); setStatus("판별 중 오류가 났어요.", "err"); }
+    finally { busy = false; }
+  }
+
+  /* 사진 */
+  function showImageFile(file) {
+    if (!file || !/^image\//.test(file.type)) { setStatus("이미지 파일만 올릴 수 있어요.", "err"); return; }
+    if (!model) { setStatus("먼저 모델을 불러와 주세요.", "err"); return; }
+    stopCamera();
+    var img = new Image();
+    img.onload = function () {
+      stage.innerHTML = "";
+      stage.appendChild(img);
+      predict(img);
+    };
+    img.alt = "판별할 사진";
+    img.src = URL.createObjectURL(file);
+  }
+
+  pickBtn.addEventListener("click", function () { fileInput.click(); });
+  fileInput.addEventListener("change", function () {
+    if (fileInput.files[0]) showImageFile(fileInput.files[0]);
+    fileInput.value = "";
+  });
+  stage.addEventListener("dragover", function (e) { e.preventDefault(); stage.classList.add("over"); });
+  stage.addEventListener("dragleave", function () { stage.classList.remove("over"); });
+  stage.addEventListener("drop", function (e) {
+    e.preventDefault();
+    stage.classList.remove("over");
+    if (e.dataTransfer.files[0]) showImageFile(e.dataTransfer.files[0]);
+  });
+  stage.addEventListener("keydown", function (e) {
+    if ((e.key === "Enter" || e.key === " ") && model) { e.preventDefault(); fileInput.click(); }
+  });
+
+  /* 카메라 */
+  async function startCamera() {
+    if (!model) return;
+    camBtn.disabled = true;
+    try {
+      webcam = new tmImage.Webcam(480, 480, true);
+      await webcam.setup();
+      await webcam.play();
+      stage.innerHTML = "";
+      stage.appendChild(webcam.canvas);
+      camOn = true;
+      camBtn.textContent = "카메라 끄기";
+      var loop = async function () {
+        if (!camOn) return;
+        webcam.update();
+        await predict(webcam.canvas);
+        rafId = window.requestAnimationFrame(loop);
+      };
+      rafId = window.requestAnimationFrame(loop);
+    } catch (err) {
+      console.error(err);
+      setStatus("카메라를 켤 수 없어요. 브라우저의 카메라 권한을 확인해 주세요. (https 또는 localhost에서만 동작해요)", "err");
+    } finally {
+      camBtn.disabled = false;
+    }
+  }
+
+  function stopCamera() {
+    camOn = false;
+    if (rafId) { window.cancelAnimationFrame(rafId); rafId = 0; }
+    if (webcam) { try { webcam.stop(); } catch (e) {} webcam = null; }
+    camBtn.textContent = "카메라 켜기";
+  }
+
+  camBtn.addEventListener("click", function () {
+    if (camOn) {
+      stopCamera();
+      stage.innerHTML = '<div class="hint">사진을 여기로 끌어다 놓거나<br>아래 버튼으로 고르세요.</div>';
+    } else {
+      startCamera();
+    }
+  });
+
+  $("model-form").addEventListener("submit", function (e) {
+    e.preventDefault();
+    loadModel(urlInput.value);
+  });
+
+  /* 시작: 코드에 고정한 링크, 주소의 ?model=, 지난번에 쓴 링크 순서로 확인 */
+  var fromQuery = "";
+  try { fromQuery = new URLSearchParams(location.search).get("model") || ""; } catch (e) {}
+  var saved = "";
+  try { saved = localStorage.getItem("otter-weasel-model") || ""; } catch (e) {}
+  var initial = DEFAULT_MODEL_URL || fromQuery || saved;
+  if (initial) { urlInput.value = initial; loadModel(initial); }
+})();
+</script>
+</body>
+</html>
